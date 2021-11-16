@@ -533,26 +533,28 @@ void ControlStepper(void *argument)
   for(;;)
   {
 	//Change direction depending on Error sign
-	if (ANGLE_ERROR < 0){
-		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_RESET);
-		status = 100;
-	}
-	else{
-		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_SET);
-		status = 200;
-	}
-	ANGLE_ERROR = abs(ANGLE_ERROR);
-	//ARR inversely proportional to error
-	PWM_PERIOD = 20*65535/(ANGLE_ERROR+1);
-	PWM_DUTY_CYCLE = PWM_PERIOD/2;
-	if(ANGLE_ERROR < 2){
-		PWM_DUTY_CYCLE = 0;
-		//TODO: CALL THRUST THREAD
-		osThreadFlagsSet(StartThrustHandle, 0x03);
-		osThreadFlagsWait(0x02,osFlagsWaitAny, osWaitForever);
-	}
+//	if (ANGLE_ERROR < 0){
+//		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_RESET);
+//		status = 100;
+//	}
+//	else{
+//		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_SET);
+//		status = 200;
+//	}
+//	ANGLE_ERROR = abs(ANGLE_ERROR);
+//	//ARR inversely proportional to error
+//	PWM_PERIOD = 20*65535/(ANGLE_ERROR+1);
+//	PWM_DUTY_CYCLE = PWM_PERIOD/2;
+//	if(ANGLE_ERROR < 2){
+//		PWM_DUTY_CYCLE = 0;
+//		//TODO: CALL THRUST THREAD
+//		osThreadFlagsSet(StartThrustHandle, 0x03);
+//		osThreadFlagsWait(0x02,osFlagsWaitAny, osWaitForever);
+//	}
+
+	PWM_PERIOD = 32000;
 	TIM1->ARR  = PWM_PERIOD;
-	TIM1->CCR3 = PWM_DUTY_CYCLE;
+	TIM1->CCR3 = PWM_PERIOD/2;
 //	for (int i = 0; i<ANGLE_ERROR/0.45;i++){
 //		HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_13);
 //		HAL_Delay(1);
