@@ -80,7 +80,8 @@ void ControlStepper(void *argument);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-uint8_t SPI_tx[2] = {0xFF, 0xFF};
+//SPI Transmit and Receive buffers
+uint8_t SPI_tx[2] = {0xFF, 0xFF}; //0xFF is a read angle command for the AS5048A magnetic encoder
 uint8_t SPI_rx[2];
 
 uint16_t INITIAL_ANGLE = 0;
@@ -91,6 +92,7 @@ static int16_t ANGLE_ERROR;
 const float ConvertToDegree = 360.0/16383;
 float ANGLE_DEGREE;
 
+//Used for filtering out bit 14 & 15
 uint16_t clearbits = 0x3FFF;
 
 uint16_t PWM_FREQ;
@@ -137,9 +139,10 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   HAL_Delay(10);
+  //INITIALIZE PIN STATE AS HIGH
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   HAL_Delay(10);
-  // READ INITIAL ANGLE
+  // READ INITIAL ANGLE TO GET INITIAL ANGLE OFFSET
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
   HAL_SPI_Transmit(&hspi1, &SPI_tx[0], 2, 1);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
@@ -410,25 +413,25 @@ void ReadEncoder(void *argument)
   /* Infinite loop */
   for(;;)
   {
-
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-	HAL_SPI_Transmit(&hspi1, &SPI_tx[0], 2, 1);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+	// LOOP TO DO ONE ANGLE READING
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); //PULL CSn LOW
+	HAL_SPI_Transmit(&hspi1, &SPI_tx[0], 2, 1); //TRANSMIT READ COMMAND(0xFF)
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); //PULL CSn HIGH
 	HAL_Delay(10);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-	HAL_SPI_Receive(&hspi1, &SPI_rx[0], 2, 1);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); //PULL CSn LOW
+	HAL_SPI_Receive(&hspi1, &SPI_rx[0], 2, 1); //RECEIVE ANGLE READING
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); //PULL CSn HIGH
 
-	ENCODER_ANGLE = (SPI_rx[0] << 8 | SPI_rx[1])&clearbits;
-	ENCODER_ANGLE = (ENCODER_ANGLE - INITIAL_ANGLE)&clearbits;
-	ANGLE_DEGREE = ENCODER_ANGLE*ConvertToDegree;
+	ENCODER_ANGLE = (SPI_rx[0] << 8 | SPI_rx[1])&clearbits; //FILTER OUT BIT 14&15
+	ENCODER_ANGLE = (ENCODER_ANGLE - INITIAL_ANGLE)&clearbits; //REMOVE INITIAL ANGLE OFFSET
+	ANGLE_DEGREE = ENCODER_ANGLE*ConvertToDegree; //CONVERTS 14-bit number to 360 degree
 
 	if(ANGLE_DEGREE > 180){
 		ANGLE_DEGREE = ANGLE_DEGREE - 360;
 	}
-	ANGLE_ERROR = ANGLE_REF - ANGLE_DEGREE;
+	ANGLE_ERROR = ANGLE_REF - ANGLE_DEGREE; //CALCULATE ANGLE ERROR
 	thread1++;
-    osThreadFlagsWait(1U,osFlagsWaitAny, osWaitForever);
+    osThreadFlagsWait(1U,osFlagsWaitAny, osWaitForever); // START ControlStepper thread
 
   }
   /* USER CODE END 5 */
