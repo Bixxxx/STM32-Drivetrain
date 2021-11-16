@@ -100,7 +100,7 @@ uint16_t PWM_DUTY_CYCLE;
 
 int thread1 = 0;
 int thread2 = 0;
-
+int status = 0;
 
 /* USER CODE END 0 */
 
@@ -302,7 +302,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 72-1;
+  htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -448,16 +448,17 @@ void ControlStepper(void *argument)
   for(;;)
   {
 	//TODO: Change direction depending on Error sign
-	ANGLE_ERROR = ANGLE_REF - ANGLE_DEGREE;
 	if (ANGLE_ERROR < 0){
 		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_RESET);
+		status = 100;
 	}
 	else{
 		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_SET);
+		status = 200;
 	}
 	ANGLE_ERROR = abs(ANGLE_ERROR);
 	//ARR inversely proportional to error
-	PWM_PERIOD = 10*65535/(ANGLE_ERROR+1);
+	PWM_PERIOD = 20*65535/(ANGLE_ERROR+1);
 	PWM_DUTY_CYCLE = PWM_PERIOD/2;
 	if(ANGLE_ERROR < 2){
 		PWM_DUTY_CYCLE = 0;
@@ -465,6 +466,13 @@ void ControlStepper(void *argument)
 	}
 	TIM1->ARR  = PWM_PERIOD;
 	TIM1->CCR3 = PWM_DUTY_CYCLE;
+//	for (int i = 0; i<ANGLE_ERROR/0.45;i++){
+//		HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_13);
+//		HAL_Delay(1);
+//		HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_13);
+//		HAL_Delay(1);
+//	}
+
 
 	osDelay(500U);
 	thread2++;

@@ -5,5 +5,5 @@ main.c:289:13:MX_TIM1_Init	96	static
 main.c:364:13:MX_GPIO_Init	48	static
 main.c:407:6:ReadEncoder	16	static
 main.c:444:6:ControlStepper	16	static
-main.c:484:6:HAL_TIM_PeriodElapsedCallback	16	static
-main.c:501:6:Error_Handler	4	static,ignoring_inline_asm
+main.c:492:6:HAL_TIM_PeriodElapsedCallback	16	static
+main.c:509:6:Error_Handler	4	static,ignoring_inline_asm
