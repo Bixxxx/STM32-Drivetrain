@@ -111,7 +111,7 @@ float ANGLE_DEGREE;
 uint16_t clearbits = 0x3FFF;
 
 uint16_t PWM_FREQ;
-uint16_t PWM_PERIOD;
+uint16_t PWM_PERIOD = 32000;
 uint16_t PWM_DUTY_CYCLE;
 
 
@@ -552,7 +552,7 @@ void ControlStepper(void *argument)
 //		osThreadFlagsWait(0x02,osFlagsWaitAny, osWaitForever);
 //	}
 
-	PWM_PERIOD = 32000;
+
 	TIM1->ARR  = PWM_PERIOD;
 	TIM1->CCR3 = PWM_PERIOD/2;
 //	for (int i = 0; i<ANGLE_ERROR/0.45;i++){
