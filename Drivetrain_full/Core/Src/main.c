@@ -46,9 +46,12 @@
 CAN_HandleTypeDef hcan1;
 
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim3;
+
+UART_HandleTypeDef huart4;
+UART_HandleTypeDef huart5;
 
 /* Definitions for StartEncoder */
 osThreadId_t StartEncoderHandle;
@@ -80,8 +83,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_TIM3_Init(void);
 static void MX_CAN1_Init(void);
+static void MX_SPI2_Init(void);
+static void MX_UART4_Init(void);
+static void MX_UART5_Init(void);
 void ReadEncoder(void *argument);
 void ControlStepper(void *argument);
 void ControlThrust(void *argument);
@@ -94,8 +99,16 @@ void ControlThrust(void *argument);
 /* USER CODE BEGIN 0 */
 
 //SPI Transmit and Receive buffers
-uint8_t SPI_tx[2] = {0xFF, 0xFF}; //0xFF is a read angle command for the AS5048A magnetic encoder
-uint8_t SPI_rx[2];
+uint8_t SPI_tx1[2] = {0xFF, 0xFF}; //0xFFFF is a read angle command for the AS5048A magnetic encoder
+uint8_t SPI_rx1[2];
+
+uint8_t SPI_tx2[2] = {0xFF, 0xFF}; //0xFFFF is a read angle command for the AS5048A magnetic encoder
+uint8_t SPI_rx2[2];
+
+
+//CAN headers
+CAN_TxHeaderTypeDef TxHeader;
+CAN_RxHeaderTypeDef RxHeader;
 
 //CAN Transmit and Receive buffers
 uint8_t CAN_tx[8];
@@ -103,18 +116,27 @@ uint8_t CAN_rx[8];
 
 uint32_t TxMailbox;
 
-uint16_t INITIAL_ANGLE = 0;
-static uint16_t ENCODER_ANGLE = 0;
-static int16_t ANGLE_REF = 0;
-static int16_t ANGLE_ERROR;
+//ENCODER 1 VARAIBLES
+uint16_t INITIAL_ANGLE_1 = 0;
+static uint16_t ENCODER_ANGLE_1 = 0;
+static int8_t ANGLE_REF_1 = 0;
+static int16_t ANGLE_ERROR_1;
+float ANGLE_DEGREE_1;
 
-static float MAX_THRUST = 50.0;
-static uint16_t THRUST_DUTY_CYCLE;
-static int16_t THRUST_REF = 0;
+//ENCODER 2 VARIABLES
+uint16_t INITIAL_ANGLE_2 = 0;
+static uint16_t ENCODER_ANGLE_2 = 0;
+static int8_t ANGLE_REF_2 = 0;
+static int16_t ANGLE_ERROR_2;
+float ANGLE_DEGREE_2;
+
+//THRUST UART 1
+uint8_t THRUST_1[1] = {128};
+//THRUST UART 2
+uint8_t THRUST_2[1] = {128};
 
 
 const float ConvertToDegree = 360.0/16383;
-float ANGLE_DEGREE;
 
 //Used for filtering out bit 14 & 15
 uint16_t clearbits = 0x3FFF;
@@ -161,25 +183,48 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   MX_TIM1_Init();
-  MX_TIM3_Init();
   MX_CAN1_Init();
+  MX_SPI2_Init();
+  MX_UART4_Init();
+  MX_UART5_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+
+  HAL_CAN_Start(&hcan1);
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
   HAL_Delay(10);
-  //INITIALIZE PIN STATE AS HIGH
+
+  // INITIALIZE PIN STATE AS HIGH FOR ENCODER 1
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   HAL_Delay(10);
-  // READ INITIAL ANGLE TO GET INITIAL ANGLE OFFSET
+
+  // INITIALIZE PIN STATE AS HIGH FOR ENCODER 2
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
+  HAL_Delay(10);
+
+  // READ INITAL ANGLE OFFSET ENCODER 1
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, &SPI_tx[0], 2, 1);
+  HAL_SPI_Transmit(&hspi1, &SPI_tx1[0], 2, 1);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   HAL_Delay(10);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-  HAL_SPI_Receive(&hspi1, &SPI_rx[0], 2, 1);
+  HAL_SPI_Receive(&hspi1, &SPI_rx1[0], 2, 1);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
-  INITIAL_ANGLE = (SPI_rx[0] << 8 | SPI_rx[1])&clearbits;
+  INITIAL_ANGLE_1 = (SPI_rx1[0] << 8 | SPI_rx1[1])&clearbits;
+  HAL_Delay(10);
+
+  // READ INITAL ANGLE OFFSET ENCODER 2
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(&hspi2, &SPI_tx2[0], 2, 1);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+  HAL_Delay(10);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  HAL_SPI_Receive(&hspi2, &SPI_rx2[0], 2, 1);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+  INITIAL_ANGLE_2 = (SPI_rx2[0] << 8 | SPI_rx2[1])&clearbits;
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -315,9 +360,9 @@ static void MX_CAN1_Init(void)
   canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
   canfilterconfig.FilterBank = 0;
   canfilterconfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  canfilterconfig.FilterIdHigh = 0x0<<5;
+  canfilterconfig.FilterIdHigh = 0x200<<5;
   canfilterconfig.FilterIdLow = 0;
-  canfilterconfig.FilterMaskIdHigh = 0x0<<5;
+  canfilterconfig.FilterMaskIdHigh = 0x110<<5;
   canfilterconfig.FilterMaskIdLow = 0x0000;
   canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
   canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
@@ -368,6 +413,44 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI2_Init(void)
+{
+
+  /* USER CODE BEGIN SPI2_Init 0 */
+
+  /* USER CODE END SPI2_Init 0 */
+
+  /* USER CODE BEGIN SPI2_Init 1 */
+
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI2_Init 2 */
+
+  /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -388,7 +471,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -420,6 +503,10 @@ static void MX_TIM1_Init(void)
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
   {
     Error_Handler();
@@ -443,61 +530,68 @@ static void MX_TIM1_Init(void)
 }
 
 /**
-  * @brief TIM3 Initialization Function
+  * @brief UART4 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM3_Init(void)
+static void MX_UART4_Init(void)
 {
 
-  /* USER CODE BEGIN TIM3_Init 0 */
+  /* USER CODE BEGIN UART4_Init 0 */
 
-  /* USER CODE END TIM3_Init 0 */
+  /* USER CODE END UART4_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
+  /* USER CODE BEGIN UART4_Init 1 */
 
-  /* USER CODE BEGIN TIM3_Init 1 */
-
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 0;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  /* USER CODE END UART4_Init 1 */
+  huart4.Instance = UART4;
+  huart4.Init.BaudRate = 9600;
+  huart4.Init.WordLength = UART_WORDLENGTH_8B;
+  huart4.Init.StopBits = UART_STOPBITS_1;
+  huart4.Init.Parity = UART_PARITY_NONE;
+  huart4.Init.Mode = UART_MODE_TX_RX;
+  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_HalfDuplex_Init(&huart4) != HAL_OK)
   {
     Error_Handler();
   }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
+  /* USER CODE BEGIN UART4_Init 2 */
 
-  /* USER CODE END TIM3_Init 2 */
-  HAL_TIM_MspPostInit(&htim3);
+  /* USER CODE END UART4_Init 2 */
+
+}
+
+/**
+  * @brief UART5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART5_Init(void)
+{
+
+  /* USER CODE BEGIN UART5_Init 0 */
+
+  /* USER CODE END UART5_Init 0 */
+
+  /* USER CODE BEGIN UART5_Init 1 */
+
+  /* USER CODE END UART5_Init 1 */
+  huart5.Instance = UART5;
+  huart5.Init.BaudRate = 9600;
+  huart5.Init.WordLength = UART_WORDLENGTH_8B;
+  huart5.Init.StopBits = UART_STOPBITS_1;
+  huart5.Init.Parity = UART_PARITY_NONE;
+  huart5.Init.Mode = UART_MODE_TX_RX;
+  huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart5.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_HalfDuplex_Init(&huart5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN UART5_Init 2 */
+
+  /* USER CODE END UART5_Init 2 */
 
 }
 
@@ -513,16 +607,23 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOF, GPIO_PIN_4|GPIO_PIN_14, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_15, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PF4 PF14 */
   GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_14;
@@ -531,24 +632,40 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pins : PA4 PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PE9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
 }
 
 /* USER CODE BEGIN 4 */
 
-/* CAN RX CALLBACK FUNCTION */
+/* CAN RX0 CALLBACK FUNCTION */
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
 	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, CAN_rx);
 	if(RxHeader.DLC == 8){
-		datacheck = 1;
-		status = 1000;
+		THRUST_1[0] = CAN_rx[0];
+		THRUST_2[0] = CAN_rx[0];
+		ANGLE_REF_1 = CAN_rx[1];
+		ANGLE_REF_2 = CAN_rx[1];
 	}
 }
 
@@ -567,23 +684,56 @@ void ReadEncoder(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	// LOOP TO DO ONE ANGLE READING
+	  	  	  	  	  /************************
+	  	  	  	  	   * ---- ENCODER 1 ----- *
+	  	  	  	  	   ************************/
+
+	// READ ENCODER 1
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); //PULL CSn LOW
-	HAL_SPI_Transmit(&hspi1, &SPI_tx[0], 2, 1); //TRANSMIT READ COMMAND(0xFF)
+	HAL_SPI_Transmit(&hspi1, &SPI_tx1[0], 2, 1); //TRANSMIT READ COMMAND(0xFFFF)
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); //PULL CSn HIGH
-	HAL_Delay(10);
+	HAL_Delay(1);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); //PULL CSn LOW
-	HAL_SPI_Receive(&hspi1, &SPI_rx[0], 2, 1); //RECEIVE ANGLE READING
+	HAL_SPI_Receive(&hspi1, &SPI_rx1[0], 2, 1); //RECEIVE ANGLE READING
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); //PULL CSn HIGH
 
-	ENCODER_ANGLE = (SPI_rx[0] << 8 | SPI_rx[1])&clearbits; //FILTER OUT BIT 14&15
-	ENCODER_ANGLE = (ENCODER_ANGLE - INITIAL_ANGLE)&clearbits; //REMOVE INITIAL ANGLE OFFSET
-	ANGLE_DEGREE = ENCODER_ANGLE*ConvertToDegree; //CONVERTS 14-bit number to 360 degree
+	//CLEAR NON-DATA BITS ENCODER 1
+	ENCODER_ANGLE_1 = (SPI_rx1[0] << 8 | SPI_rx1[1])&clearbits; //FILTER OUT BIT 14&15
+	ENCODER_ANGLE_1 = (ENCODER_ANGLE_1 - INITIAL_ANGLE_1)&clearbits; //REMOVE INITIAL ANGLE OFFSET
 
-	if(ANGLE_DEGREE > 180){
-		ANGLE_DEGREE = ANGLE_DEGREE - 360;
+	//RECOMPUTE ANGLE FROM 14-BIT DATA TO -180 TO 180 DEGREE ANGLE FOR ENCODER 1
+	ANGLE_DEGREE_1 = ENCODER_ANGLE_1*ConvertToDegree; //CONVERTS 14-bit number to 360 degree
+	if(ANGLE_DEGREE_1 > 180){
+			ANGLE_DEGREE_1 = ANGLE_DEGREE_1 - 360;
 	}
-	ANGLE_ERROR = ANGLE_REF - ANGLE_DEGREE; //CALCULATE ANGLE ERROR
+			//TODO:REMOVE COMMENTS
+			ANGLE_ERROR_1 = ANGLE_REF_1 - ANGLE_DEGREE_1; //CALCULATE ANGLE ERROR
+
+		 	 	   	   /************************
+		 	 	   	    * ---- ENCODER 2 ----- *
+		 	 	   	    ************************/
+
+	//READ ENCODER 2
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET); //PULL CSn LOW
+	HAL_SPI_Transmit(&hspi2, &SPI_tx2[0], 2, 1); //TRANSMIT READ COMMAND(0xFF)
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET); //PULL CSn HIGH
+	HAL_Delay(1);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET); //PULL CSn LOW
+	HAL_SPI_Receive(&hspi2, &SPI_rx2[0], 2, 1); //RECEIVE ANGLE READING
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET); //PULL CSn HIGH
+
+	//CLEAR NON-DATA BITS ENCODER 2
+	ENCODER_ANGLE_2 = (SPI_rx2[0] << 8 | SPI_rx2[1])&clearbits; //FILTER OUT BIT 14&15
+	ENCODER_ANGLE_2 = (ENCODER_ANGLE_2 - INITIAL_ANGLE_2)&clearbits; //REMOVE INITIAL ANGLE OFFSET
+
+	//RECOMPUTE ANGLE FROM 14-BIT DATA TO -180 TO 180 DEGREE ANGLE FOR ENCODER 2
+	ANGLE_DEGREE_2 = ENCODER_ANGLE_2*ConvertToDegree; //CONVERTS 14-bit number to 360 degree
+	if(ANGLE_DEGREE_2 > 180){
+			ANGLE_DEGREE_2 = ANGLE_DEGREE_2 - 360;
+	}
+			//TODO: REMOVE COMMENTS
+			ANGLE_ERROR_2 = ANGLE_REF_2 - ANGLE_DEGREE_2; //CALCULATE ANGLE ERROR
+
 	thread1++;
     osThreadFlagsWait(0x01,osFlagsWaitAny, osWaitForever); // START ControlStepper thread
 
@@ -604,46 +754,67 @@ void ControlStepper(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	//Change direction depending on Error sign
-	if (ANGLE_ERROR > 0){
+	osDelay(1U);
+
+
+	  	  	  	  	  /************************
+	 	  	  	  	   * ---- STEPPER 1 ----- *
+	 	  	  	  	   ************************/
+
+	//CHANGE DIRECTION FOR STEPPER 1 DEPENDING ON ERROR SIGN
+	if (ANGLE_ERROR_1 > 0){
 		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_RESET);
-		status = 100;
 	}
 	else{
 		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_SET);
-		status = 200;
 	}
-	ANGLE_ERROR = abs(ANGLE_ERROR);
-//	ANGLE_ERROR = abs(ANGLE_ERROR);
-//	//ARR inversely proportional to error
-//	PWM_PERIOD = 20*65535/(ANGLE_ERROR+1);
-//	PWM_DUTY_CYCLE = PWM_PERIOD/2;
-//	if(ANGLE_ERROR < 2){
-//		PWM_DUTY_CYCLE = 0;
-//		//TODO: CALL THRUST THREAD
-//		osThreadFlagsSet(StartThrustHandle, 0x03);
-//		osThreadFlagsWait(0x02,osFlagsWaitAny, osWaitForever);
-//	}
-	if(ANGLE_ERROR > 2){
+
+	ANGLE_ERROR_1 = abs(ANGLE_ERROR_1);
+	//UPDATE CCR REGISTER FOR STEPPER 1
+	if(ANGLE_ERROR_1 > 2){
 		TIM1->ARR  = PWM_PERIOD;
 		TIM1->CCR3 = PWM_PERIOD/2;
 	}
 	else{
 		TIM1->ARR = PWM_PERIOD;
 		TIM1->CCR3 = PWM_PERIOD;
+
+	}
+	  	  	  	  	  	  /************************
+			  	  	  	   * ---- STEPPER 2 ----- *
+			  	  	  	   ************************/
+
+	//CHANGE DIRECTION FOR STEPPER 1 DEPENDING ON ERROR SIGN
+
+	if (ANGLE_ERROR_2 > 0){
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, GPIO_PIN_RESET);
+		}
+		else{
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, GPIO_PIN_SET);
+		}
+	//UPDATE CCR REGISTER FOR STEPPER 1
+	ANGLE_ERROR_2 = abs(ANGLE_ERROR_2);
+	if(ANGLE_ERROR_2 > 2){
+		TIM1->ARR  = PWM_PERIOD;
+		TIM1->CCR2 = PWM_PERIOD/2;
+		}
+		else{
+			TIM1->ARR = PWM_PERIOD;
+			TIM1->CCR2 = PWM_PERIOD;
+		}
+
+
+
+	if( (ANGLE_ERROR_1 <= 2) && (ANGLE_ERROR_2 <= 2) ){
+		osThreadFlagsSet(startThrustHandle, 0x03); //FLAG THRUST THREAD
+		osThreadFlagsWait(0x02, osFlagsWaitAny, osWaitForever); //START THRUST THREAD
 	}
 
-//	for (int i = 0; i<ANGLE_ERROR/0.45;i++){
-//		HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_13);
-//		HAL_Delay(1);
-//		HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_13);
-//		HAL_Delay(1);
-//	}
 
-
-	osDelay(1U);
+	//START ENCODER THREAD
 	thread2++;
 	osThreadFlagsSet(StartEncoderHandle, 0x01);
+
   }
   /* USER CODE END ControlStepper */
 }
@@ -662,12 +833,23 @@ void ControlThrust(void *argument)
   for(;;)
   {
 	//TIM3 ARR = 65535
-	osThreadFlagsWait(0x03,osFlagsWaitAny, osWaitForever);
-	THRUST_DUTY_CYCLE = (THRUST_REF / MAX_THRUST)*65535;
-	TIM3->CCR4 = THRUST_DUTY_CYCLE;
+
+	osThreadFlagsWait(0x03,osFlagsWaitAny, osWaitForever); // STOP THREAD
+
+						   /************************
+			  	  	  	    * ---- THRUST 1 ----- *
+			  	  	  	    ************************/
+	HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_2), 100);
+
+    					   /************************
+    			  	  	  	* ---- THRUST 2 ----- *
+    			  	  	  	************************/
+	HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 100);
+
 	thread3++;
-    osDelay(1);
-    osThreadFlagsSet(StartStepperHandle, 0x02);
+	osDelay(1);
+	osThreadFlagsSet(StartStepperHandle, 0x02);
+
 
   }
   /* USER CODE END ControlThrust */
