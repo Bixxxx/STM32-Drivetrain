@@ -97,6 +97,10 @@ void ControlThrust(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int MANUAL = 0;
+int16_t MANUAL_ANGLE_REF = 0;
+uint8_t MANUAL_THRUST_REF[1] = {128};
+
 
 //SPI Transmit and Receive buffers
 uint8_t SPI_tx1[2] = {0xFF, 0xFF}; //0xFFFF is a read angle command for the AS5048A magnetic encoder
@@ -117,24 +121,34 @@ uint8_t CAN_rx[8];
 uint32_t TxMailbox;
 
 //ENCODER 1 VARAIBLES
-uint16_t INITIAL_ANGLE_1 = 0;
+uint16_t INITIAL_ANGLE_1 = 15092; //15092 raw value
 static uint16_t ENCODER_ANGLE_1 = 0;
-static int8_t ANGLE_REF_1 = 0;
+static float ANGLE_REF_1 = 0;
 static int16_t ANGLE_ERROR_1;
 float ANGLE_DEGREE_1;
 
 //ENCODER 2 VARIABLES
-uint16_t INITIAL_ANGLE_2 = 0;
+uint16_t INITIAL_ANGLE_2 = 14706; //14706 raw value
 static uint16_t ENCODER_ANGLE_2 = 0;
-static int8_t ANGLE_REF_2 = 0;
+static float ANGLE_REF_2 = 0;
 static int16_t ANGLE_ERROR_2;
 float ANGLE_DEGREE_2;
 
-//THRUST UART 1
-uint8_t THRUST_1[1] = {128};
-//THRUST UART 2
-uint8_t THRUST_2[1] = {128};
+float VOLTAGE_1 = 0;
+float VOLTAGE_2 = 0;
+float MAX_VOLTAGE = 11.1;
 
+//THRUST UART 1 (left)
+static float THRUST_1_REF;
+uint8_t  THRUST_1[1] = {128};
+//THRUST UART 2 (right)
+static float THRUST_2_REF;
+uint8_t  THRUST_2[1] = {128};
+
+int8_t THRUST_1_CAN[4] = {0, 0, 0, 0};
+int8_t THRUST_2_CAN[4] = {0, 0, 0, 0};
+int8_t ANGLE_REF_1_CAN[4] = {0, 0, 0, 0};
+int8_t ANGLE_REF_2_CAN[4] = {0, 0, 0, 0};
 
 const float ConvertToDegree = 360.0/16383;
 
@@ -144,7 +158,6 @@ uint16_t clearbits = 0x3FFF;
 uint16_t PWM_FREQ;
 uint16_t PWM_PERIOD = 64000;
 uint16_t PWM_DUTY_CYCLE;
-
 
 int thread1 = 0;
 int thread2 = 0;
@@ -205,7 +218,7 @@ int main(void)
   HAL_Delay(10);
 
   // READ INITAL ANGLE OFFSET ENCODER 1
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+ /* HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
   HAL_SPI_Transmit(&hspi1, &SPI_tx1[0], 2, 1);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   HAL_Delay(10);
@@ -224,7 +237,7 @@ int main(void)
   HAL_SPI_Receive(&hspi2, &SPI_rx2[0], 2, 1);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
   INITIAL_ANGLE_2 = (SPI_rx2[0] << 8 | SPI_rx2[1])&clearbits;
-
+*/
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -360,9 +373,9 @@ static void MX_CAN1_Init(void)
   canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
   canfilterconfig.FilterBank = 0;
   canfilterconfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  canfilterconfig.FilterIdHigh = 0x200<<5;
+  canfilterconfig.FilterIdHigh = 0x5<<5;
   canfilterconfig.FilterIdLow = 0;
-  canfilterconfig.FilterMaskIdHigh = 0x110<<5;
+  canfilterconfig.FilterMaskIdHigh = 0x0<<5;
   canfilterconfig.FilterMaskIdLow = 0x0000;
   canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
   canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
@@ -662,10 +675,46 @@ static void MX_GPIO_Init(void)
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
 	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, CAN_rx);
 	if(RxHeader.DLC == 8){
-		THRUST_1[0] = CAN_rx[0];
-		THRUST_2[0] = CAN_rx[0];
-		ANGLE_REF_1 = CAN_rx[1];
-		ANGLE_REF_2 = CAN_rx[1];
+		if(RxHeader.StdId == 0x01){
+			THRUST_1_CAN[0] = CAN_rx[0];
+			THRUST_1_CAN[1] = CAN_rx[1];
+			THRUST_1_CAN[2] = CAN_rx[2];
+			THRUST_1_CAN[3] = CAN_rx[3];	//need to change the correct bits for each motor thrust
+
+			//combining bytes into float (Left motor thrust)
+			THRUST_1_REF = *(float*)&THRUST_1_CAN; // max = 160, min = -40 N
+
+			THRUST_2_CAN[0] = CAN_rx[4];
+			THRUST_2_CAN[1] = CAN_rx[5];
+			THRUST_2_CAN[2] = CAN_rx[6];
+			THRUST_2_CAN[3] = CAN_rx[7];
+
+			//combining bytes into float (Left motor thrust)
+			THRUST_2_REF = *(float*)&THRUST_2_CAN; // max = 160, min = -40 N
+
+
+		}
+		else if(RxHeader.StdId == 0x02){
+			ANGLE_REF_1_CAN[0] = CAN_rx[0];
+			ANGLE_REF_1_CAN[1] = CAN_rx[1];
+			ANGLE_REF_1_CAN[2] = CAN_rx[2];
+			ANGLE_REF_1_CAN[3] = CAN_rx[3];
+
+			ANGLE_REF_1 = (*(float*)&ANGLE_REF_1_CAN)*2; // max = 30, min = -30 degree --> +/- 60 degree (stepper gear ratio)
+
+			ANGLE_REF_2_CAN[0] = CAN_rx[4];
+			ANGLE_REF_2_CAN[1] = CAN_rx[5];
+			ANGLE_REF_2_CAN[2] = CAN_rx[6];
+			ANGLE_REF_2_CAN[3] = CAN_rx[7];
+
+			ANGLE_REF_2 = (*(float*)&ANGLE_REF_2_CAN)*2; // max = 30, min = -30 degree --> +/- 60 degree (stepper gear ratio)
+		}
+		else{
+			printf("Wrong message ID, motor thrust and angle unchanged");
+		}
+		thread1=0;
+		thread2=0;
+		thread3=0;
 	}
 }
 
@@ -755,12 +804,19 @@ void ControlStepper(void *argument)
   for(;;)
   {
 	osDelay(1U);
-
-
+	if(MANUAL == 1){
+		ANGLE_ERROR_1 = MANUAL_ANGLE_REF - ANGLE_DEGREE_1;
+		ANGLE_ERROR_2 = MANUAL_ANGLE_REF - ANGLE_DEGREE_2;
+	}else{
 	  	  	  	  	  /************************
 	 	  	  	  	   * ---- STEPPER 1 ----- *
 	 	  	  	  	   ************************/
-
+	//saturation of reference angles to their maximum/minimum
+	if (ANGLE_REF_1>60){ANGLE_REF_1=60;}
+	else if(ANGLE_REF_1<-60){ANGLE_REF_1=-60;}
+	if (ANGLE_REF_2>60){ANGLE_REF_2=60;}
+	else if(ANGLE_REF_2<-60){ANGLE_REF_2=-60;}
+	}
 	//CHANGE DIRECTION FOR STEPPER 1 DEPENDING ON ERROR SIGN
 	if (ANGLE_ERROR_1 > 0){
 		HAL_GPIO_WritePin(GPIOF, GPIO_PIN_14, GPIO_PIN_RESET);
@@ -771,7 +827,7 @@ void ControlStepper(void *argument)
 
 	ANGLE_ERROR_1 = abs(ANGLE_ERROR_1);
 	//UPDATE CCR REGISTER FOR STEPPER 1
-	if(ANGLE_ERROR_1 > 2){
+	if(ANGLE_ERROR_1 > 0.9){
 		TIM1->ARR  = PWM_PERIOD;
 		TIM1->CCR3 = PWM_PERIOD/2;
 	}
@@ -794,7 +850,7 @@ void ControlStepper(void *argument)
 		}
 	//UPDATE CCR REGISTER FOR STEPPER 1
 	ANGLE_ERROR_2 = abs(ANGLE_ERROR_2);
-	if(ANGLE_ERROR_2 > 2){
+	if(ANGLE_ERROR_2 > 0.9){
 		TIM1->ARR  = PWM_PERIOD;
 		TIM1->CCR2 = PWM_PERIOD/2;
 		}
@@ -829,6 +885,8 @@ void ControlStepper(void *argument)
 void ControlThrust(void *argument)
 {
   /* USER CODE BEGIN ControlThrust */
+HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
+HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
   /* Infinite loop */
   for(;;)
   {
@@ -836,16 +894,55 @@ void ControlThrust(void *argument)
 
 	osThreadFlagsWait(0x03,osFlagsWaitAny, osWaitForever); // STOP THREAD
 
+	//IF CAN DOESNT SEND
+	/*if(thread3>5000){	//if statement to disable thrust thread if we stop recieving can messages
+		THRUST_1[0] = 128;
+		THRUST_2[0] = 128;
+		HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
+		HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
+		osDelay(1);
+		osThreadFlagsSet(StartStepperHandle, 0x02);
+	} */
 						   /************************
 			  	  	  	    * ---- THRUST 1 ----- *
 			  	  	  	    ************************/
-	HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_2), 100);
+	if(MANUAL == 1){
+		HAL_UART_Transmit(&huart4, MANUAL_THRUST_REF, sizeof(MANUAL_THRUST_REF), 2); //THRUST 1 (left)
+		HAL_UART_Transmit(&huart5, MANUAL_THRUST_REF, sizeof(MANUAL_THRUST_REF), 2); //THRUST 2 (right)
+	}else{
 
+	if(THRUST_1_REF > 0){ //scaling from
+		VOLTAGE_1 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_1_REF))/(2*1.002);
+		THRUST_1[0] = 127*(VOLTAGE_1/MAX_VOLTAGE)+128;
+  	}
+	else if (THRUST_1_REF < 0){
+		VOLTAGE_1 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_1_REF))/(2*0.302);
+		THRUST_1[0] = -127*(VOLTAGE_1/MAX_VOLTAGE) + 128;
+	}
+	else{
+		THRUST_1[0] = 128;
+	}
     					   /************************
     			  	  	  	* ---- THRUST 2 ----- *
     			  	  	  	************************/
-	HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 100);
 
+	if(THRUST_2_REF > 0){ //scaling from
+		VOLTAGE_2 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_2_REF))/(2*1.002);
+		THRUST_2[0] = 127*(VOLTAGE_2/MAX_VOLTAGE)+128;
+  	}
+	else if (THRUST_2_REF < 0){
+		VOLTAGE_2 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_2_REF))/(2*0.302);
+		THRUST_2[0] = -127*(VOLTAGE_2/MAX_VOLTAGE)+128;
+	}
+	else{
+		THRUST_2[0] = 128;
+	}
+	HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
+	HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
+	}
+
+
+	status++;
 	thread3++;
 	osDelay(1);
 	osThreadFlagsSet(StartStepperHandle, 0x02);
