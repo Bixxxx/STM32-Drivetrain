@@ -691,7 +691,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
 
 			//combining bytes into float (Left motor thrust)
 			THRUST_2_REF = *(float*)&THRUST_2_CAN; // max = 160, min = -40 N
-
+			thread3=0;
 
 		}
 		else if(RxHeader.StdId == 0x02){
@@ -708,13 +708,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
 			ANGLE_REF_2_CAN[3] = CAN_rx[7];
 
 			ANGLE_REF_2 = (*(float*)&ANGLE_REF_2_CAN)*2; // max = 30, min = -30 degree --> +/- 60 degree (stepper gear ratio)
+
 		}
 		else{
 			printf("Wrong message ID, motor thrust and angle unchanged");
 		}
-		thread1=0;
-		thread2=0;
-		thread3=0;
+
 	}
 }
 
@@ -894,51 +893,48 @@ HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
 
 	osThreadFlagsWait(0x03,osFlagsWaitAny, osWaitForever); // STOP THREAD
 
-	//IF CAN DOESNT SEND
-	/*if(thread3>5000){	//if statement to disable thrust thread if we stop recieving can messages
-		THRUST_1[0] = 128;
-		THRUST_2[0] = 128;
-		HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
-		HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
-		osDelay(1);
-		osThreadFlagsSet(StartStepperHandle, 0x02);
-	} */
 						   /************************
 			  	  	  	    * ---- THRUST 1 ----- *
 			  	  	  	    ************************/
 	if(MANUAL == 1){
 		HAL_UART_Transmit(&huart4, MANUAL_THRUST_REF, sizeof(MANUAL_THRUST_REF), 2); //THRUST 1 (left)
 		HAL_UART_Transmit(&huart5, MANUAL_THRUST_REF, sizeof(MANUAL_THRUST_REF), 2); //THRUST 2 (right)
-	}else{
-
-	if(THRUST_1_REF > 0){ //scaling from
-		VOLTAGE_1 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_1_REF))/(2*1.002);
-		THRUST_1[0] = 127*(VOLTAGE_1/MAX_VOLTAGE)+128;
-  	}
-	else if (THRUST_1_REF < 0){
-		VOLTAGE_1 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_1_REF))/(2*0.302);
-		THRUST_1[0] = -127*(VOLTAGE_1/MAX_VOLTAGE) + 128;
 	}
 	else{
-		THRUST_1[0] = 128;
-	}
+
+		if(THRUST_1_REF > 0){ //scaling from
+			VOLTAGE_1 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_1_REF))/(2*1.002);
+			THRUST_1[0] = 127*(VOLTAGE_1/MAX_VOLTAGE)+128;
+		}
+		else if (THRUST_1_REF < 0){
+			VOLTAGE_1 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_1_REF))/(2*0.302);
+			THRUST_1[0] = -127*(VOLTAGE_1/MAX_VOLTAGE) + 128;
+		}
+		else{
+			THRUST_1[0] = 128;
+		}
     					   /************************
     			  	  	  	* ---- THRUST 2 ----- *
     			  	  	  	************************/
 
-	if(THRUST_2_REF > 0){ //scaling from
-		VOLTAGE_2 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_2_REF))/(2*1.002);
-		THRUST_2[0] = 127*(VOLTAGE_2/MAX_VOLTAGE)+128;
-  	}
-	else if (THRUST_2_REF < 0){
-		VOLTAGE_2 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_2_REF))/(2*0.302);
-		THRUST_2[0] = -127*(VOLTAGE_2/MAX_VOLTAGE)+128;
-	}
-	else{
-		THRUST_2[0] = 128;
-	}
-	HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
-	HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
+		if(THRUST_2_REF > 0){ //scaling from
+			VOLTAGE_2 = (-3.44+sqrt(3.44*3.44+4*1.003*THRUST_2_REF))/(2*1.002);
+			THRUST_2[0] = 127*(VOLTAGE_2/MAX_VOLTAGE)+128;
+		}
+		else if (THRUST_2_REF < 0){
+			VOLTAGE_2 = (-0.17+sqrt(0.17*0.17+4*0.302*-1*THRUST_2_REF))/(2*0.302);
+			THRUST_2[0] = -127*(VOLTAGE_2/MAX_VOLTAGE)+128;
+		}
+		else{
+			THRUST_2[0] = 128;
+		}
+
+		if (thread3 > 2000){ //IF CAN DOESNT SEND
+			THRUST_1[0] = 128;
+			THRUST_2[0] = 128;
+		}
+		HAL_UART_Transmit(&huart4, THRUST_1, sizeof(THRUST_1), 2); //THRUST 1 (left)
+		HAL_UART_Transmit(&huart5, THRUST_2, sizeof(THRUST_2), 2); //THRUST 2 (right)
 	}
 
 
